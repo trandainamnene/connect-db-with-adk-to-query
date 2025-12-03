@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import logging
 import os
 from datetime import date, datetime
+from decimal import Decimal
 
 load_dotenv()
 config = {
@@ -14,15 +15,17 @@ config = {
 }
 
 def convert_value_to_json_serializable(value):
-    """Convert date/datetime objects to strings for JSON serialization."""
+    """Convert non-JSON serializable objects (date, datetime, Decimal) to JSON compatible types."""
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    elif isinstance(value, Decimal):
+        return float(value)
     elif value is None:
         return None
     else:
         return value
 
-def query_SysOption() -> dict:
+def query_DeviceInfo(userid : str) -> dict:
     """
     Execute a SELECT query on MSSQL and return results.
     """
@@ -34,7 +37,7 @@ def query_SysOption() -> dict:
             "message": f"TABLE configuration not found in .env file. Please add TABLE=your_table_name to your .env file at {env_path}"
         }
     
-    query = f"SELECT * FROM {table_name}"
+    query = f"SELECT * FROM {table_name} WHERE UserID = '{userid}'"
     try:
         conn = get_connection()
         cursor = conn.cursor()
