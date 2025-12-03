@@ -37,12 +37,12 @@ def query_DeviceInfo(userid : str) -> dict:
             "message": f"TABLE configuration not found in .env file. Please add TABLE=your_table_name to your .env file at {env_path}"
         }
     
-    query = f"SELECT * FROM {table_name} WHERE UserID = '{userid}'"
+    query = f"SELECT * FROM {table_name} WHERE UserID = ?"
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(query)
+        cursor.execute(query , (userid,))
         columns = [col[0] for col in cursor.description]
         rows = cursor.fetchall()
 
