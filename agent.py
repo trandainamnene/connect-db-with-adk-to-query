@@ -87,22 +87,24 @@ CRITICAL: You MUST use the EXACT error text from statusMessage in your search. T
 Search query should be in Vietnamese and MUST include:
 - The EXACT error/problem text from statusMessage (use the actual words/phrases from statusMessage)
 - The device information (DeviceName/OS/OSVersion) if available
-- Keywords like "cách sửa", "khắc phục", "fix", "giải quyết", "hướng dẫn", "lỗi"
+- Keywords like "cách sửa", "khắc phục", "fix", "giải quyết", "hướng dẫn", "lỗi", "screenshot", "hình ảnh"
+- Add keywords to get tutorial pages with images: "screenshot", "hình ảnh", "tutorial", "hướng dẫn có hình"
 
 Example queries (adapt based on actual statusMessage content):
-- If statusMessage = "GPS signal not found": "GPS signal not found device_name cách sửa khắc phục tiếng việt"
-- If statusMessage = "Location permission denied": "Location permission denied device_name cách fix hướng dẫn tiếng việt"
-- If statusMessage = "Network connection timeout": "Network connection timeout device_name cách sửa tiếng việt"
-- If statusMessage = "App crash when opening": "App crash when opening device_name cách khắc phục tiếng việt"
-- Use: "[exact statusMessage text] device_name cách sửa khắc phục tiếng việt"
+- If statusMessage = "GPS signal not found": "GPS signal not found device_name cách sửa khắc phục tiếng việt screenshot hướng dẫn"
+- If statusMessage = "Location permission denied": "Location permission denied device_name cách fix hướng dẫn tiếng việt có hình ảnh"
+- If statusMessage = "Network connection timeout": "Network connection timeout device_name cách sửa tiếng việt tutorial screenshot"
+- If statusMessage = "App crash when opening": "App crash when opening device_name cách khắc phục tiếng việt hình ảnh"
+- Use: "[exact statusMessage text] device_name cách sửa khắc phục tiếng việt screenshot tutorial"
 
 IMPORTANT: 
 - Use the ACTUAL text from statusMessage in your search query
 - Do NOT use generic terms - use what statusMessage actually says
 - The statusMessage could be in English or Vietnamese - use it as is
 - Combine statusMessage with device info to get relevant results
+- Always include image-related keywords to get results with screenshots/tutorial images
 
-Focus on finding Vietnamese language solutions and troubleshooting guides.
+Focus on finding Vietnamese language solutions and troubleshooting guides with images/screenshots.
 
 Step 4 – Compile and respond:
 
@@ -140,7 +142,7 @@ CRITICAL - statusMessage is the PRIMARY and ONLY source to identify the error:
 - Your entire response must be based on the error/problem described in statusMessage
 - Do NOT assume what the error is - statusMessage tells you the exact error
 - The error could be about location, network, apps, system, or anything else
-- statusMessage might say "Lỗi định vị" or it might say something completely different
+- statusMessage say something completely different
 - Whatever statusMessage says, that's the error you need to help fix
 
 ALWAYS use Exa MCP tools to search for solutions based on the statusMessage content.

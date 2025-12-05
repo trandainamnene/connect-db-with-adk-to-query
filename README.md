@@ -1,11 +1,11 @@
 # Hướng Dẫn Bật Định Vị Điện Thoại
 
-Dự án hỗ trợ hướng dẫn người dùng cách bật chế độ định vị trên điện thoại dựa trên loại thiết bị và phiên bản hệ điều hành. Đây là một phần của dự án hỗ trợ hộ nghèo, giúp người dùng dễ dàng kích hoạt định vị trên thiết bị của mình.
+Dự án hỗ trợ hướng dẫn người dùng xử lý các lỗi cơ bản gặp phải khi sử dụng phần mềm Hộ Nghèo dựa trên loại thiết bị và phiên bản hệ điều hành. Đây là một phần của dự án hỗ trợ hộ nghèo, giúp người dùng dễ dàng kích hoạt định vị trên thiết bị của mình.
 
 ## 🎯 Mục đích
 
 Dự án này được thiết kế để:
-- Nhận thông tin về loại điện thoại và phiên bản hệ điều hành của người dùng
+- Nhận thông tin về loại điện thoại và phiên bản hệ điều hành của người dùng kèm lỗi đang gặp phải
 - Tự động tìm kiếm hướng dẫn phù hợp datasource
 - Cung cấp hướng dẫn chi tiết, dễ hiểu về cách bật chế độ định vị trên thiết bị cụ thể
 
@@ -123,8 +123,17 @@ locate_instruction/
 
 1. **Người dùng yêu cầu hướng dẫn**: Cung cấp userid hoặc thông tin thiết bị
 2. **Lấy thông tin thiết bị**: Agent sử dụng `query_DeviceInfo` để lấy thông tin từ database
-3. **Tìm kiếm hướng dẫn**: Agent tự động sử dụng Exa MCP tools để tìm kiếm các bài viết hướng dẫn bằng tiếng Việt trên web
-4. **Tổng hợp và trả lời**: Agent tổng hợp thông tin và cung cấp hướng dẫn chi tiết kèm link bài viết tiếng Việt
+3. **Phân tích lỗi**: Agent đọc trường `StatusMessage` từ database để xác định lỗi cụ thể mà người dùng đang gặp phải
+4. **Tìm kiếm giải pháp**: Agent tự động sử dụng Exa MCP tools để tìm kiếm các bài viết hướng dẫn giải quyết lỗi bằng tiếng Việt trên web
+5. **Tổng hợp và trả lời**: Agent tổng hợp thông tin và cung cấp hướng dẫn chi tiết kèm link bài viết tiếng Việt
+
+## 📸 Demo
+
+Dưới đây là một số ví dụ về cách Agent hoạt động:
+
+![Demo 1 - Quy trình làm việc của Agent](demo_1.png)
+
+![Demo 2 - Ví dụ hướng dẫn chi tiết](demo_2.png)
 
 ## 📝 Cấu trúc Database
 
