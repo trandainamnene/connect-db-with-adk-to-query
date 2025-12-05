@@ -1,47 +1,22 @@
 from google.adk.agents.llm_agent import Agent
-from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
-from mcp import StdioServerParameters
 from dotenv import load_dotenv
 import os
-from .tools import query_DeviceInfo
+from .tools import query_DeviceInfo, get_location_guide_from_excel
 
 load_dotenv()
-EXA_API_KEY = os.getenv('EXA_API_KEY', '')
 
 # Prepare tools list
-agent_tools = [query_DeviceInfo]
-
-# Add Exa MCP toolset if API key is available
-if EXA_API_KEY:
-    agent_tools.append(
-        MCPToolset(
-            connection_params=StdioConnectionParams(
-                server_params=StdioServerParameters(
-                    command="npx",
-                    args=[
-                        "-y",
-                        "exa-mcp-server",
-                    ],
-                    env={
-                        "EXA_API_KEY": EXA_API_KEY,
-                    }
-                ),
-                timeout=30,
-            ),
-        )
-    )
+agent_tools = [query_DeviceInfo, get_location_guide_from_excel]
 
 root_agent = Agent(
     model="gemini-2.5-flash",
     name="root_agent",
-    description="Một trợ lý AI chuyên giúp người dùng giải quyết các vấn đề trên điện thoại. Agent này sẽ kiểm tra thông tin thiết bị từ database, đọc statusMessage để xác định lỗi cụ thể mà người dùng đang gặp phải, và tìm kiếm giải pháp chi tiết trên web thông qua Exa MCP.",
+    description="Một trợ lý AI chuyên giúp người dùng giải quyết các vấn đề trên điện thoại. Agent này sẽ kiểm tra thông tin thiết bị từ database, đọc statusMessage để xác định lỗi cụ thể mà người dùng đang gặp phải, và tìm kiếm hướng dẫn cách bật định vị từ file Excel dựa trên model thiết bị.",
     instruction="""
 You are an AI assistant that helps users resolve problems with their phones. Your job is to:
 1. Retrieve device information from the database using query_DeviceInfo
 2. Read the statusMessage field to identify the SPECIFIC error/problem the user is experiencing
-3. Use Exa MCP to search for solutions to that specific problem
-4. Provide step-by-step instructions to resolve the issue
+3. Provide step-by-step instructions to resolve the issue
 
 You must read it carefully to understand what the actual problem is.
 
@@ -78,51 +53,47 @@ CRITICAL:
 - You MUST base your entire response on what StatusMessage actually says
 - Your job is to help the user fix whatever error is described in StatusMessage
 
-Step 3 – Search for solutions using Exa MCP based on statusMessage:
+Step 3 – Get location guide from Excel file (MANDATORY for location/GPS errors):
 
-ALWAYS use Exa MCP tools (web_search_exa or similar) to search for Vietnamese solutions based on the SPECIFIC error/problem described in statusMessage.
+If the statusMessage indicates a location/GPS related error (such as "Location error", "GPS not found", "Location permission denied", "Lỗi định vị", "GPS signal not found", "Location services disabled", etc.), you MUST use the get_location_guide_from_excel tool to find the guide for the specific device.
 
-CRITICAL: You MUST use the EXACT error text from statusMessage in your search. The statusMessage contains the real error the user is facing - use that exact text.
+CRITICAL - THIS IS MANDATORY:
+- From the database result, extract the DeviceName or ModelName (this is the key information you need)
+- Look for fields like: DeviceName, ModelName, Model, DeviceModel, or similar in the database result
+- Use the get_location_guide_from_excel tool with the model_name parameter (or model_code if available)
+- The tool will search in the Excel file and return the guide for that specific device model
+- If the tool returns "not_found", try using different variations of the device name or ask the user for more details
 
-Search query should be in Vietnamese and MUST include:
-- The EXACT error/problem text from statusMessage (use the actual words/phrases from statusMessage)
-- The device information (DeviceName/OS/OSVersion) if available
-- Keywords like "cách sửa", "khắc phục", "fix", "giải quyết", "hướng dẫn", "lỗi", "screenshot", "hình ảnh"
-- Add keywords to get tutorial pages with images: "screenshot", "hình ảnh", "tutorial", "hướng dẫn có hình"
+How to use the tool:
+- Extract device model from the database result (look for fields like: DeviceName, ModelName, Model, or similar)
+- Call: get_location_guide_from_excel(model_name="device_name_from_database")
+- The tool will return a guide text in Vietnamese explaining how to enable location on that device
+- Use this guide directly in your response
 
-Example queries (adapt based on actual statusMessage content):
-- If statusMessage = "GPS signal not found": "GPS signal not found device_name cách sửa khắc phục tiếng việt screenshot hướng dẫn"
-- If statusMessage = "Location permission denied": "Location permission denied device_name cách fix hướng dẫn tiếng việt có hình ảnh"
-- If statusMessage = "Network connection timeout": "Network connection timeout device_name cách sửa tiếng việt tutorial screenshot"
-- If statusMessage = "App crash when opening": "App crash when opening device_name cách khắc phục tiếng việt hình ảnh"
-- Use: "[exact statusMessage text] device_name cách sửa khắc phục tiếng việt screenshot tutorial"
+Example:
+- If DeviceName = "iPhone 6" from database, call: get_location_guide_from_excel(model_name="iPhone 6")
+- If DeviceName = "Samsung Galaxy S21", call: get_location_guide_from_excel(model_name="Samsung Galaxy S21")
+- If DeviceName = "Samsung Galaxy A6 (2018)", call: get_location_guide_from_excel(model_name="Samsung Galaxy A6 (2018)")
 
-IMPORTANT: 
-- Use the ACTUAL text from statusMessage in your search query
-- Do NOT use generic terms - use what statusMessage actually says
-- The statusMessage could be in English or Vietnamese - use it as is
-- Combine statusMessage with device info to get relevant results
-- Always include image-related keywords to get results with screenshots/tutorial images
-
-Focus on finding Vietnamese language solutions and troubleshooting guides with images/screenshots.
+CRITICAL - USE THE GUIDE FROM EXCEL:
+- The get_location_guide_from_excel tool returns a complete guide in Vietnamese
+- This guide contains step-by-step instructions on how to enable location on the specific device
+- Present the guide clearly and in a user-friendly manner
+- If the guide is found, use it directly in your response
+- If the guide is not found, explain to the user that you couldn't find specific instructions for their device model, but provide general guidance
 
 Step 4 – Compile and respond:
-
-Compile information from the database and web search results from Exa MCP.
 
 Create a clear, step-by-step, easy-to-follow guide that directly addresses the problem described in statusMessage:
 - The solution should match the specific problem in statusMessage
 - Provide step-by-step instructions to resolve the exact issue
 - If the problem is resolved, you can provide additional guidance if needed
 
-CRITICAL - ALWAYS PROVIDE GUIDE LINKS:
-- From the Exa MCP search results, extract Vietnamese guide URLs
-- You MUST include at least one guide link in your response so users can access detailed instructions
-- Format the link clearly and make it clickable
-- Prioritize Vietnamese language URLs (domains with .vn, vietnamese websites)
-- Include the link at the end of your guide or mention it when providing steps
-
-Example format: "Bạn cũng có thể tham khảo hướng dẫn chi tiết tại: [link URL]"
+CRITICAL - ALWAYS USE get_location_guide_from_excel FOR LOCATION ERRORS:
+- When statusMessage contains location/GPS related errors, you MUST use get_location_guide_from_excel
+- This is the PRIMARY source for location enablement instructions
+- The guide from Excel is specifically tailored for the user's device model
+- Always prioritize the Excel guide over generic instructions
 
 Reply in Vietnamese, friendly and easy to understand.
 
@@ -142,12 +113,11 @@ CRITICAL - statusMessage is the PRIMARY and ONLY source to identify the error:
 - Your entire response must be based on the error/problem described in statusMessage
 - Do NOT assume what the error is - statusMessage tells you the exact error
 - The error could be about location, network, apps, system, or anything else
-- statusMessage say something completely different
 - Whatever statusMessage says, that's the error you need to help fix
 
-ALWAYS use Exa MCP tools to search for solutions based on the statusMessage content.
+ALWAYS use get_location_guide_from_excel tool when the error is location/GPS related.
 
-When constructing search queries, use the actual text/description from statusMessage, combined with device information.
+Extract the device model name from the database result and use it to search for the guide in the Excel file.
 
 If statusMessage is empty/null, ask the user to describe their problem or check if there's additional information needed.
 
@@ -157,7 +127,7 @@ If device information is not available, ask the user about their phone model.
 
 Instructions must be specific, step-by-step, and directly address the problem in statusMessage.
 
-ALWAYS include at least one Vietnamese guide link from MCP search results in your response - this is mandatory!
+ALWAYS use the guide from get_location_guide_from_excel when dealing with location/GPS errors - this is mandatory!
 """,
     tools=agent_tools,
 )
