@@ -127,11 +127,20 @@ def get_location_guide_from_excel(model_name: str = None, model_code: str = None
         if result is not None:
             guide_text = str(result.get('How_to_Enable_Location', ''))
             
+            # Lấy danh sách ảnh từ cột Picture (nếu có)
+            pictures = []
+            picture_value = result.get('Picture', '')
+            if picture_value and str(picture_value).strip() and str(picture_value).lower() != 'nan':
+                # Tách các URL ảnh bằng dấu phẩy
+                picture_urls = [url.strip() for url in str(picture_value).split(',') if url.strip()]
+                pictures = picture_urls
+            
             return {
                 "status": "success",
                 "model_code": str(result.get('ModelCode', '')),
                 "model_name": str(result.get('ModelName', '')),
                 "guide": guide_text,
+                "pictures": pictures,  # Danh sách URL ảnh
                 "message": "Hướng dẫn đã được tìm thấy"
             }
         else:
