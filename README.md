@@ -1,4 +1,4 @@
-# Hướng Dẫn Bật Định Vị Điện Thoại
+# Module chat ứng dụng hộ nghèo
 
 Dự án hỗ trợ hướng dẫn người dùng xử lý các lỗi cơ bản gặp phải khi sử dụng phần mềm Hộ Nghèo dựa trên loại thiết bị và phiên bản hệ điều hành. Đây là một phần của dự án hỗ trợ hộ nghèo, giúp người dùng dễ dàng kích hoạt định vị trên thiết bị của mình.
 
