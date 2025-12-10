@@ -3,11 +3,11 @@ from dotenv import load_dotenv
 from .tools import (
     get_complete_location_guide,
     query_DeviceInfo,
-    get_location_guide_from_excel,
+    get_location_guide_from_pdf,  # Thay thế get_location_guide_from_excel
     get_location_guide_from_json,
     get_all_instruction_images,
     determine_folder_type_from_device_name,
-    process_docx_files
+    process_pdf_files  # Thay thế process_docx_files
 )
 
 load_dotenv()
@@ -16,10 +16,10 @@ agent_tools = [
     get_complete_location_guide,
     query_DeviceInfo,
     get_location_guide_from_json,
-    get_location_guide_from_excel,
+    get_location_guide_from_pdf,
     get_all_instruction_images,
     determine_folder_type_from_device_name,
-    process_docx_files
+    process_pdf_files
 ]
 
 root_agent = Agent(
@@ -38,9 +38,11 @@ WORKFLOW:
 
 2. USE get_complete_location_guide (PREFERRED - saves quota):
    - Returns: device_name, status_message (CRITICAL - read this for error), guide, images[], folder_type
-   - If JSON error: call process_docx_files(), then retry get_complete_location_guide
-   - If images[] has items: MUST display ALL using ![Bước X](url) format
+   - If JSON error: call process_pdf_files(), then retry get_complete_location_guide
+   - If images[] has items: MUST display ALL using ![Ảnh X](url) format
    - Match images to steps by step_number
+   - If device_name is empty or missing, use OS field from device_info to determine folder_type (e.g., if OS contains 'iOS' or 'iPhone' → IOS, else Android). Then, use get_location_guide_from_json with the determined folder_type to get guide and images.
+   - Only display guide and images for the determined folder_type (IOS or Android). Do not display both—select only one based on OS or device_name.
 
 3. ANALYZE status_message:
    - This is the PRIMARY source for the error/problem
@@ -48,21 +50,23 @@ WORKFLOW:
    - Base your entire response on what status_message says
 
 4. DISPLAY IMAGES (MANDATORY when available):
-   - Format: "Bước X: [text]\n![Bước X](url)"
+   - Format: "Bước X :\n\n![Ảnh X](url)"
    - Use exact URL from images[].url field
    - Show image right after corresponding step text
    - If images[] is empty, show text guide only
 
 5. FALLBACK (if get_complete_location_guide fails):
-   - For location/GPS errors: use get_location_guide_from_excel(model_name=DeviceName)
+   - For location/GPS errors: use get_location_guide_from_pdf(model_name=DeviceName)
    - Extract DeviceName from database result
-   - Use guide from Excel directly in response
+   - Use guide from PDF directly in response
+   - If no DeviceName, use OS to determine folder_type as in step 2.
+   - Only display guide and images for the determined folder_type (IOS or Android). Do not display both.
 
 CRITICAL RULES:
 - status_message is the ONLY source to identify error - read it carefully
 - Always prefer get_complete_location_guide (1 call vs 4 separate calls)
 - Display images automatically when available - don't ask permission
-- If JSON error: call process_docx_files() then retry
+- If JSON error: call process_pdf_files() then retry
 - Reply in Vietnamese, step-by-step, actionable instructions
 """,
     tools=agent_tools,

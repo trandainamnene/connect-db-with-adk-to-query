@@ -11,6 +11,8 @@ import http.server
 import socketserver
 import threading
 import urllib.parse
+import pdfplumber
+from PIL import Image
 
 load_dotenv()
 config = {
@@ -62,8 +64,7 @@ _image_server_thread = None
 
 
 class ImageHandler(http.server.SimpleHTTPRequestHandler):
-    """HTTP handler để serve ảnh từ paths trong JSON."""
-    
+    """HTTP handler để serve ảnh từ paths trong JSON."""    
     def do_GET(self):
         try:
             parsed_path = urllib.parse.urlparse(self.path)
@@ -188,7 +189,7 @@ def _get_mime_type(filename: str) -> str:
 
 def get_all_instruction_images(folder_type: str = "IOS") -> dict:
     """
-    Lấy tất cả hình ảnh từ JSON (đã parse từ docx) và trả về HTTP URLs.
+    Lấy tất cả hình ảnh từ JSON (đã parse từ PDF) và trả về HTTP URLs.
     
     Args:
         folder_type: Loại - "IOS" hoặc "Android" (mặc định: "IOS")
@@ -276,7 +277,7 @@ def get_all_instruction_images(folder_type: str = "IOS") -> dict:
 
 def get_pictures_from_instruction_folder(model_name: str, model_code: str = None) -> dict:
     """
-    Lấy metadata về hình ảnh từ JSON (đã parse từ docx).
+    Lấy metadata về hình ảnh từ JSON (đã parse từ pdf).
     
     Args:
         model_name: Tên model thiết bị
@@ -390,9 +391,9 @@ def query_DeviceInfo(userid: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def get_location_guide_from_excel(model_name: str = None, model_code: str = None) -> dict:
+def get_location_guide_from_pdf(model_name: str = None, model_code: str = None) -> dict:
     """
-    Tìm kiếm hướng dẫn cách bật định vị từ file Excel dựa trên tên model hoặc model code.
+    Tìm kiếm hướng dẫn cách bật định vị từ file PDF dựa trên tên model hoặc model code.
     
     Args:
         model_name: Tên model thiết bị (ví dụ: "iPhone 6", "Samsung Galaxy S21")
@@ -403,161 +404,235 @@ def get_location_guide_from_excel(model_name: str = None, model_code: str = None
     """
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        excel_path = os.path.join(current_dir, "device_models_with_location.xlsx")
+        pdf_path = os.path.join(current_dir, "Location_Instruction.pdf")
         
-        if not os.path.exists(excel_path):
+        if not os.path.exists(pdf_path):
             return {
                 "status": "error",
-                "message": f"File Excel không tìm thấy tại: {excel_path}"
+                "message": f"File PDF không tìm thấy tại: {pdf_path}"
             }
         
-        df = pd.read_excel(excel_path)
+        # Sử dụng pdfplumber để parse bảng từ PDF
+        tables = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                extracted_tables = page.extract_tables()
+                for table in extracted_tables:
+                    tables.extend(table[1:])  # Bỏ header
+        
+        if not tables:
+            return {
+                "status": "error",
+                "message": "Không tìm thấy bảng dữ liệu trong PDF"
+            }
+        
+        # Chuyển thành DataFrame
+        df = pd.DataFrame(tables, columns=["ModelCode", "ModelName", "How_to_Enable_Location"])
         df = df.dropna(subset=['How_to_Enable_Location'])
         
-        result = None
-        
-        # Tìm kiếm theo ModelCode trước (nếu có)
+        mask = False
+        if model_name:
+            mask |= df['ModelName'].astype(str).str.contains(model_name, case=False, na=False)
         if model_code:
-            model_code = str(model_code).strip()
-            matches = df[df['ModelCode'].astype(str).str.contains(model_code, case=False, na=False, regex=False)]
-            if not matches.empty:
-                result = matches.iloc[0]
+            mask |= df['ModelCode'].astype(str).str.contains(model_code, case=False, na=False)
         
-        # Nếu không tìm thấy theo ModelCode, tìm theo ModelName
-        if result is None and model_name:
-            model_name = str(model_name).strip()
-            matches = df[df['ModelName'].astype(str).str.contains(model_name, case=False, na=False, regex=False)]
-            if not matches.empty:
-                result = matches.iloc[0]
+        matches = df[mask]
         
-        # Nếu vẫn không tìm thấy, thử tìm kiếm linh hoạt hơn
-        if result is None:
-            search_term = model_name or model_code or ""
-            if search_term:
-                search_term = str(search_term).strip().lower()
-                mask = (
-                    df['ModelCode'].astype(str).str.lower().str.contains(search_term, na=False, regex=False) |
-                    df['ModelName'].astype(str).str.lower().str.contains(search_term, na=False, regex=False)
-                )
-                matches = df[mask]
-                if not matches.empty:
-                    result = matches.iloc[0]
-        
-        if result is not None:
-            guide_text = str(result.get('How_to_Enable_Location', ''))
-            found_model_name = str(result.get('ModelName', ''))
-            found_model_code = str(result.get('ModelCode', ''))
-            
-            logging.info(f"Getting pictures for model: {found_model_name}")
-            pictures_data = get_pictures_from_instruction_folder(found_model_name, found_model_code)
-            logging.info(f"Found {pictures_data.get('count', 0)} images in {pictures_data.get('folder_type', 'Unknown')}_Instruction folder")
-            
+        if matches.empty:
             return {
-                "status": "success",
-                "model_code": found_model_code,
-                "model_name": found_model_name,
-                "guide": guide_text,
-                "pictures": pictures_data,
-                "message": "Hướng dẫn đã được tìm thấy"
+                "status": "error",
+                "message": f"Không tìm thấy hướng dẫn cho model: {model_name or model_code}"
             }
-        else:
+        
+        result = matches.iloc[0]
+        guide_text_raw = result.get('How_to_Enable_Location', '')
+        guide_text = "" if pd.isna(guide_text_raw) else str(guide_text_raw).strip()
+        
+        if not guide_text:
             return {
-                "status": "not_found",
-                "message": f"Không tìm thấy hướng dẫn cho model: {model_name or model_code}",
-                "available_models_count": len(df)
+                "status": "error",
+                "message": f"Không có hướng dẫn chi tiết cho model: {model_name or model_code}"
             }
-            
-    except Exception as e:
-        logging.error(f"Error reading Excel file: {e}")
+        
+        logging.info(f"Found guide from PDF for {model_name or model_code}")
+        
         return {
-            "status": "error",
-            "message": f"Lỗi khi đọc file Excel: {str(e)}"
-        }
-
-
-def process_docx_files() -> dict:
-    """
-    Chạy script process_docx.py để extract images từ Word và tạo JSON files.
-    Tool này sẽ tự động xử lý IOS.docx và Android.docx.
-    
-    Yêu cầu dependencies:
-    - Pillow (pip install Pillow)
-    - unstructured[docx] (pip install unstructured[docx])
-    - python-docx (pip install python-docx)
-    
-    Hoặc chạy: pip install -r requirements.txt
-    
-    Returns:
-        dict: Kết quả xử lý với thông tin về số steps và images đã tạo
-    """
-    try:
-        # Import và chạy process_docx
-        import sys
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        if current_dir not in sys.path:
-            sys.path.insert(0, current_dir)
-        import process_docx
-        
-        logging.info("Running process_docx_files()")
-        process_docx.process_docx_files()
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        ios_json = os.path.join(current_dir, "ios_instructions.json")
-        android_json = os.path.join(current_dir, "android_instructions.json")
-        
-        result = {
             "status": "success",
-            "message": "Đã xử lý file Word và tạo JSON thành công"
+            "model_name": result.get('ModelName', ''),
+            "model_code": result.get('ModelCode', ''),
+            "guide": guide_text
         }
-        
-        # Đếm steps trong JSON files
-        if os.path.exists(ios_json):
-            try:
-                with open(ios_json, 'r', encoding='utf-8') as f:
-                    ios_data = json.load(f)
-                result["ios_steps"] = len(ios_data)
-                result["ios_images"] = sum(1 for s in ios_data if s.get("image_path") and os.path.exists(s.get("image_path")))
-            except:
-                pass
-        
-        if os.path.exists(android_json):
-            try:
-                with open(android_json, 'r', encoding='utf-8') as f:
-                    android_data = json.load(f)
-                result["android_steps"] = len(android_data)
-                result["android_images"] = sum(1 for s in android_data if s.get("image_path") and os.path.exists(s.get("image_path")))
-            except:
-                pass
-        
-        logging.info(f"process_docx completed: {result}")
-        return result
         
     except ImportError as e:
-        error_msg = str(e)
-        logging.error(f"Missing dependencies for process_docx: {error_msg}")
-        
         return {
             "status": "error",
-            "message": f"Thiếu dependencies: {error_msg}. Chạy: pip install -r requirements.txt",
-            "error_type": "ImportError",
-            "error_details": error_msg,
-            "suggestion": "pip install -r requirements.txt",
-            "install_commands": ["pip install -r requirements.txt", "pip install Pillow unstructured[docx] python-docx"]
+            "message": f"Thiếu thư viện: {str(e)}. Hãy cài đặt pdfplumber: pip install pdfplumber"
         }
     except Exception as e:
-        logging.error(f"Error running process_docx: {e}")
+        logging.error(f"Error reading PDF: {e}")
         import traceback
         logging.error(traceback.format_exc())
         return {
             "status": "error",
-            "message": f"Lỗi khi xử lý file Word: {str(e)}"
+            "message": f"Lỗi khi đọc PDF: {str(e)}"
+        }
+
+
+def process_pdf_files() -> dict:
+    """
+    Xử lý file PDF để trích xuất text và hình ảnh thành JSON và folder ảnh.
+    
+    Returns:
+        dict: Kết quả xử lý
+    """
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        pdf_path = os.path.join(current_dir, "Location_Instruction.pdf")
+        
+        if not os.path.exists(pdf_path):
+            return {
+                "status": "error",
+                "message": f"PDF file not found: {pdf_path}"
+            }
+        
+        # Extract table using pdfplumber
+        tables = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                extracted_tables = page.extract_tables()
+                for table in extracted_tables:
+                    tables.extend(table[1:])  # Skip header
+        
+        if not tables:
+            return {
+                "status": "error",
+                "message": "Không tìm thấy bảng dữ liệu trong PDF"
+            }
+        
+        df = pd.DataFrame(tables, columns=["ModelCode", "ModelName", "How_to_Enable_Location"])
+        df = df.dropna(subset=['How_to_Enable_Location'])
+        
+        # Separate iOS and Android
+        ios_df = df[df['ModelCode'].astype(str).str.startswith('iPhone')]
+        android_df = df[~df['ModelCode'].astype(str).str.startswith('iPhone')]
+        
+        # Get guide for iOS and clean
+        if not ios_df.empty:
+            ios_guide_raw = ios_df['How_to_Enable_Location'].iloc[0].strip()
+            match = re.search(r'vào (.+?) ở ứng dụng HỘ NGHÈO và bật lên\.', ios_guide_raw)
+            ios_guide = match.group(1) if match else ios_guide_raw
+            ios_parts = re.split(r'\s*>\s*', ios_guide)
+            ios_parts = [p.strip() for p in ios_parts if p.strip()]
+            if len(ios_parts) > 1 and 'ở ứng dụng HỘ NGHÈO và bật lên' in ios_parts[-1]:
+                ios_parts[-1] = ios_parts[-1].replace('ở ứng dụng HỘ NGHÈO và bật lên', '')
+                ios_parts.append('ứng dụng HỘ NGHÈO')
+                ios_parts.append('bật lên')
+        else:
+            ios_parts = []
+        
+        # Get guide for Android and clean
+        if not android_df.empty:
+            android_guide_raw = android_df['How_to_Enable_Location'].iloc[0].strip()
+            match = re.search(r'(Bước 1: .+? Cho phép)', android_guide_raw, re.DOTALL)
+            android_guide = match.group(1) if match else android_guide_raw
+            android_parts = re.split(r'\s*→\s*', android_guide)
+            android_parts = [p.strip() for p in android_parts if p.strip()]
+        else:
+            android_parts = []
+        
+        # Extract images using pdfplumber
+        all_images = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                for img in page.images:
+                    bbox = (img['x0'], img['top'], img['x1'], img['bottom'])
+                    cropped_page = page.within_bbox(bbox)
+                    pil_img = cropped_page.to_image().original
+                    all_images.append(pil_img)
+        
+        # Slice images: 0-4 for iOS, 5-7 for Android (assuming 8 images)
+        ios_image_data = all_images[0:5]
+        android_image_data = all_images[5:8]
+        
+        # Save iOS images
+        ios_folder = os.path.join(current_dir, "IOS_Instruction")
+        os.makedirs(ios_folder, exist_ok=True)
+        ios_images = []
+        for i, pil_img in enumerate(ios_image_data, 1):
+            image_filename = f"{i}.jpg"
+            image_path = os.path.join(ios_folder, image_filename)
+            pil_img = pil_img.convert('RGB')
+            pil_img.save(image_path, "JPEG")
+            rel_image_path = os.path.relpath(image_path, current_dir)
+            ios_images.append(rel_image_path)
+        
+        # Save Android images
+        android_folder = os.path.join(current_dir, "Android_Instruction")
+        os.makedirs(android_folder, exist_ok=True)
+        android_images = []
+        for i, pil_img in enumerate(android_image_data, 1):
+            image_filename = f"{i}.jpg"
+            image_path = os.path.join(android_folder, image_filename)
+            pil_img = pil_img.convert('RGB')
+            pil_img.save(image_path, "JPEG")
+            rel_image_path = os.path.relpath(image_path, current_dir)
+            android_images.append(rel_image_path)
+        
+        # Create steps for iOS
+        ios_steps = []
+        for i, part in enumerate(ios_parts, 1):
+            image_path = ios_images[i-1] if i-1 < len(ios_images) else None
+            ios_steps.append({
+                "step_number": i,
+                "text": part,
+                "image_path": image_path,
+                "folder_type": "IOS"
+            })
+        
+        # Create steps for Android
+        android_steps = []
+        for i, part in enumerate(android_parts, 1):
+            image_path = android_images[i-1] if i-1 < len(android_images) else None
+            android_steps.append({
+                "step_number": i,
+                "text": part,
+                "image_path": image_path,
+                "folder_type": "Android"
+            })
+        
+        # Save to JSON
+        ios_json_path = os.path.join(current_dir, "ios_instructions.json")
+        with open(ios_json_path, 'w', encoding='utf-8') as f:
+            json.dump(ios_steps, f, ensure_ascii=False, indent=2)
+        
+        android_json_path = os.path.join(current_dir, "android_instructions.json")
+        with open(android_json_path, 'w', encoding='utf-8') as f:
+            json.dump(android_steps, f, ensure_ascii=False, indent=2)
+        
+        logging.info(f"Processed PDF: IOS steps {len(ios_steps)}, images {len(ios_images)}; Android steps {len(android_steps)}, images {len(android_images)}")
+        return {
+            "status": "success",
+            "ios_steps_count": len(ios_steps),
+            "android_steps_count": len(android_steps),
+            "ios_images_count": len(ios_images),
+            "android_images_count": len(android_images),
+            "message": "PDF processed successfully"
+        }
+        
+    except Exception as e:
+        logging.error(f"Error processing PDF: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return {
+            "status": "error",
+            "message": f"Lỗi khi xử lý PDF: {str(e)}"
         }
 
 
 def get_location_guide_from_json(device_name: str) -> dict:
     """
-    Lấy hướng dẫn từ file JSON (đã được parse từ Word).
-    TỰ ĐỘNG chạy process_docx_files() nếu JSON không tồn tại hoặc rỗng.
+    Lấy hướng dẫn từ file JSON (đã được parse từ PDF).
+    TỰ ĐỘNG chạy process_pdf_files() nếu JSON không tồn tại hoặc rỗng.
     
     Args:
         device_name: Tên thiết bị (ví dụ: "iPhone XS Max", "Samsung Galaxy J7")
@@ -583,9 +658,9 @@ def get_location_guide_from_json(device_name: str) -> dict:
             has_images = any(f.lower().endswith(('.jpg', '.jpeg', '.png')) 
                            for f in os.listdir(image_folder))
         
-        should_run_process_docx = not json_exists or not image_folder_exists or not has_images
+        should_run_process_pdf = not json_exists or not image_folder_exists or not has_images
         
-        if should_run_process_docx:
+        if should_run_process_pdf:
             reasons = []
             if not json_exists:
                 reasons.append(f"JSON file not found: {json_path}")
@@ -594,87 +669,25 @@ def get_location_guide_from_json(device_name: str) -> dict:
             elif not has_images:
                 reasons.append(f"Image folder exists but has no images: {image_folder}")
             
-            logging.warning(f"{'; '.join(reasons)}, automatically running process_docx...")
-            try:
-                process_result = process_docx_files()
-                logging.info(f"process_docx result: {process_result}")
-                
-                if process_result.get("status") != "success" and not os.path.exists(json_path):
-                    error_msg = process_result.get('message', 'Unknown error')
-                    if process_result.get("error_type") == "ImportError":
-                        return {
-                            "status": "error",
-                            "message": process_result.get("message", error_msg),
-                            "process_result": process_result,
-                            "error_type": "ImportError",
-                            "suggestion": process_result.get("suggestion", "pip install -r requirements.txt"),
-                            "install_commands": process_result.get("install_commands", [])
-                        }
-                    return {
-                        "status": "error",
-                        "message": f"Không thể tạo file JSON: {error_msg}",
-                        "process_result": process_result,
-                        "suggestion": "pip install -r requirements.txt"
-                    }
-            except ImportError as e:
-                if not os.path.exists(json_path):
-                    return {
-                        "status": "error",
-                        "message": f"Thiếu dependencies: {str(e)}",
-                        "error_type": "ImportError",
-                        "suggestion": "pip install -r requirements.txt",
-                        "install_commands": ["pip install -r requirements.txt", "pip install Pillow unstructured[docx] python-docx"]
-                    }
-            except Exception as e:
-                logging.error(f"Exception while running process_docx: {e}")
-                import traceback
-                logging.error(traceback.format_exc())
-                if not os.path.exists(json_path):
-                    return {
-                        "status": "error",
-                        "message": f"Lỗi khi chạy process_docx: {str(e)}",
-                        "suggestion": "pip install -r requirements.txt"
-                    }
+            logging.warning(f"{'; '.join(reasons)}, automatically running process_pdf_files...")
+            process_result = process_pdf_files()
+            if process_result.get("status") != "success":
+                return process_result
         
-        steps = []
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                if content and content not in ('{}', 'null'):
-                    steps = json.loads(content)
-                    if not isinstance(steps, list):
-                        logging.warning(f"JSON file is not a list, got {type(steps)}")
-                        steps = []
-        except (json.JSONDecodeError, ValueError, FileNotFoundError) as e:
-            logging.warning(f"JSON file is invalid: {e}")
-            steps = []
-        except Exception as e:
-            logging.error(f"Error reading JSON: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-            steps = []
+        # Đọc JSON
+        with open(json_path, 'r', encoding='utf-8') as f:
+            steps = json.load(f)
         
         if not steps:
-            logging.warning(f"JSON file is empty, automatically running process_docx...")
-            process_result = process_docx_files()
-            
+            logging.warning(f"JSON file is empty, automatically running process_pdf_files...")
+            process_result = process_pdf_files()
             if process_result.get("status") == "success":
-                try:
-                    with open(json_path, 'r', encoding='utf-8') as f:
-                        steps = json.load(f)
-                except Exception as e:
-                    logging.error(f"Error reading JSON after process_docx: {e}")
-                    return {
-                        "status": "error",
-                        "message": f"Không thể đọc file JSON sau khi chạy process_docx: {str(e)}",
-                        "process_result": process_result
-                    }
-            
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    steps = json.load(f)
             if not steps:
                 return {
                     "status": "error",
-                    "message": f"Không có dữ liệu hướng dẫn trong file JSON sau khi chạy process_docx",
-                    "process_result": process_result
+                    "message": "Không có dữ liệu hướng dẫn trong file JSON"
                 }
         
         # Khởi động HTTP server nếu chưa chạy
@@ -685,88 +698,52 @@ def get_location_guide_from_json(device_name: str) -> dict:
                 "message": "Could not start image server"
             }
         
-        # Sắp xếp steps theo step_number để đảm bảo thứ tự đúng
+        # Sắp xếp steps theo step_number
         steps = sorted(steps, key=lambda x: x.get("step_number", 0))
-        logging.info(f"Sorted {len(steps)} steps by step_number: {[s.get('step_number') for s in steps]}")
         
         # Tạo guide text và images với URLs
-        current_dir = os.path.dirname(os.path.abspath(__file__))
         guide_parts = []
         images_data = []
         base_url = f"http://localhost:{server_port}"
         
-        images_by_step = {}
-        
         for step in steps:
             step_text = step.get("text", "").strip()
-            image_path = step.get("image_path")
+            image_path_rel = step.get("image_path")
+            image_path_abs = os.path.join(current_dir, image_path_rel) if image_path_rel else None
             step_number = step.get("step_number", 0)
             
             if step_text:
-                step_text = step_text.replace("→", "->")
                 guide_parts.append(f"Bước {step_number}: {step_text}")
             
-            if image_path:
-                if not os.path.isabs(image_path):
-                    image_path = os.path.join(current_dir, image_path)
-                image_path = os.path.normpath(image_path)
-            
-            if image_path and os.path.exists(image_path):
-                filename = os.path.basename(image_path)
+            if image_path_abs and os.path.exists(image_path_abs):
+                encoded_parts = [urllib.parse.quote(part) for part in image_path_rel.split(os.sep)]
+                encoded_path = '/'.join(encoded_parts)
+                image_url = f"{base_url}/{encoded_path}"
                 
-                try:
-                    rel_path = os.path.relpath(image_path, current_dir)
-                    encoded_parts = [urllib.parse.quote(part) for part in rel_path.split(os.sep)]
-                    encoded_path = '/'.join(encoded_parts)
-                    image_url = f"{base_url}/{encoded_path}"
-                except ValueError:
-                    encoded_filename = urllib.parse.quote(filename)
-                    image_url = f"{base_url}/{encoded_filename}"
-                    logging.warning(f"Could not create relative path for {image_path}, using filename only")
+                filename = os.path.basename(image_path_abs)
+                file_size = os.path.getsize(image_path_abs)
+                size_kb = round(file_size / 1024, 2)
                 
-                images_by_step[step_number] = {
+                images_data.append({
                     "filename": filename,
                     "step_number": step_number,
                     "url": image_url,
                     "mime_type": _get_mime_type(filename),
-                    "size_kb": round(os.path.getsize(image_path) / 1024, 2)
-                }
-        
-        # Tạo images_data theo đúng thứ tự step_number từ steps đã sort
-        for step in steps:
-            step_number = step.get("step_number", 0)
-            if step_number in images_by_step:
-                images_data.append(images_by_step[step_number])
-        
-        # Sort lại để đảm bảo thứ tự đúng (phòng trường hợp steps không được sort đúng)
-        images_data = sorted(images_data, key=lambda x: x.get("step_number", 0))
-        
-        # Log để debug
-        logging.info(f"Steps order: {[s.get('step_number') for s in steps]}")
-        logging.info(f"Images order BEFORE return: {[(img['step_number'], img['filename']) for img in images_data]}")
-        
-        # Nếu agent framework đang reverse, ta cần reverse lại trước khi trả về
-        # Test: reverse lại để xem agent có reverse không
-        images_data_final = list(reversed(images_data))
-        logging.info(f"Images order AFTER reverse (for agent): {[(img['step_number'], img['filename']) for img in images_data_final]}")
+                    "size_kb": size_kb
+                })
         
         guide_text = " -> ".join(guide_parts)
         
-        verified_folder_type = determine_folder_type_from_device_name(device_name)
-        if folder_type != verified_folder_type:
-            logging.warning(f"Folder type mismatch: {folder_type} → {verified_folder_type}")
-            folder_type = verified_folder_type
-        
-        logging.info(f"Retrieved guide for {device_name}: {len(images_data_final)} images, folder_type: {folder_type}")
+        logging.info(f"Retrieved guide for {device_name}: {len(images_data)} images, folder_type: {folder_type}")
         
         return {
             "status": "success",
             "device_name": device_name,
             "guide": guide_text,
-            "pictures_count": len(images_data_final),
+            "pictures_count": len(images_data),
             "folder_type": folder_type,
-            "images": images_data_final,
-            "message": f"Đã tìm thấy {len(images_data_final)} hình ảnh hướng dẫn" if images_data_final else "Không có hình ảnh"
+            "images": images_data,
+            "message": f"Đã tìm thấy {len(images_data)} hình ảnh hướng dẫn" if images_data else "Không có hình ảnh"
         }
         
     except Exception as e:
@@ -781,10 +758,10 @@ def get_location_guide_from_json(device_name: str) -> dict:
 
 def get_complete_location_guide(userid: str) -> dict:
     """
-    Tool gộp tất cả các bước: lấy device info, guide từ JSON (đã parse từ Word), và images.
+    Tool gộp tất cả các bước: lấy device info, guide từ JSON (đã parse từ PDF), và images.
     Giảm số lần gọi tool từ 4 xuống còn 1 để tiết kiệm quota.
     
-    Flow: Word → JSON (process_docx.py) → Agent (tool này)
+    Flow: PDF → JSON (process_pdf_files.py) → Agent (tool này)
     
     Args:
         userid: Tên đăng nhập của user
@@ -825,7 +802,7 @@ def get_complete_location_guide(userid: str) -> dict:
                 "message": f"Không tìm thấy hướng dẫn cho thiết bị: {device_name}",
                 "device_info": device_info,
                 "guide_result": guide_result,
-                "suggestion": "Call process_docx_files() to regenerate JSON files" if is_json_error else None
+                "suggestion": "Call process_pdf_files() to regenerate JSON files" if is_json_error else None
             }
         
         # Lấy dữ liệu từ JSON
