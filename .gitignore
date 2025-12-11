@@ -11,3 +11,6 @@ __pycache__/
 .env.local
 .DS_Store
 Thumbs.db
+extracted_images
+help_rasoathongheo_ai.json
+

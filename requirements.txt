@@ -8,3 +8,4 @@ Pillow>=10.0.0
 unstructured[docx]>=0.10.0
 unstructured[pdf] 
 pymupdf
+pdfplumber>=0.10.0

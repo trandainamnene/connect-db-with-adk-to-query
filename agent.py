@@ -2,24 +2,20 @@ from google.adk.agents.llm_agent import Agent
 from dotenv import load_dotenv
 from .tools import (
     get_complete_location_guide,
+    get_poverty_app_download_guide,
+    process_pdf_files,
     query_DeviceInfo,
-    get_location_guide_from_pdf,  # Thay thế get_location_guide_from_excel
-    get_location_guide_from_json,
-    get_all_instruction_images,
-    determine_folder_type_from_device_name,
-    process_pdf_files  # Thay thế process_docx_files
+    determine_folder_type_from_device_name
 )
 
 load_dotenv()
 
 agent_tools = [
     get_complete_location_guide,
+    get_poverty_app_download_guide,
+    process_pdf_files,
     query_DeviceInfo,
-    get_location_guide_from_json,
-    get_location_guide_from_pdf,
-    get_all_instruction_images,
-    determine_folder_type_from_device_name,
-    process_pdf_files
+    determine_folder_type_from_device_name
 ]
 
 root_agent = Agent(
@@ -36,35 +32,40 @@ WORKFLOW:
    - Extract username from any format: "tên đăng nhập là X", "X", "Tôi là X", "Username: X" → extract "X"
    - IMMEDIATELY call get_complete_location_guide(userid="X") - no confirmation needed
 
-2. USE get_complete_location_guide (PREFERRED - saves quota):
+2. USE get_complete_location_guide (PREFERRED for General/Location issues):
    - Returns: device_name, status_message (CRITICAL - read this for error), guide, images[], folder_type
    - If JSON error: call process_pdf_files(), then retry get_complete_location_guide
    - If images[] has items: MUST display ALL using ![Ảnh X](url) format
    - Match images to steps by step_number
-   - If device_name is empty or missing, use OS field from device_info to determine folder_type (e.g., if OS contains 'iOS' or 'iPhone' → IOS, else Android). Then, use get_location_guide_from_json with the determined folder_type to get guide and images.
-   - Only display guide and images for the determined folder_type (IOS or Android). Do not display both—select only one based on OS or device_name.
-   - Do not display raw table data or full PDF content. Only extract and format the step-by-step guide with images.
 
 3. ANALYZE status_message:
    - This is the PRIMARY source for the error/problem
    - Could be location, network, app, system, or any phone error
    - Base your entire response on what status_message says
 
-4. DISPLAY IMAGES (MANDATORY when available):
-   - Format: "Bước X\n\n![Ảnh X](url)"
+4. SPECIAL CASE: "Quản lý Hộ Nghèo" App Download
+   - If user asks specifically about downloading/installing "Hộ Nghèo" app:
+   - OR if status_message indicates app installation issue:
+   - Call `get_poverty_app_download_guide()`
+   - Display steps exactly in this format for each step:
+     [Instruction Text]
+     <img src="url" width="100"/>
+
+     (Leave a blank line between steps)
+
+     Example:
+     Bước 1: Chọn biểu tượng Play Store...
+     <img src="http://localhost:8765/image_1.jpg" width="100"/>
+
+     Bước 2: Nhập tìm kiếm...
+     <img src="http://localhost:8765/image_2.jpg" width="100"/>
+
+5. DISPLAY IMAGES (MANDATORY when available):
+   - Format: "Bước X\n\n<img src="url" width="300"/>"
    - Use exact URL from images[].url field
    - Show image right after corresponding step text, with a blank line between step text and image
    - If images[] is empty, show text guide only
-   - Strictly use this format for each step and image. Do not add extra text, tables, or deviate from the format. For iOS, always split the guide by ' > ' and format each part as a separate step, matching images sequentially. Do not output the entire guide as one block or table.
-
-5. FALLBACK (if get_complete_location_guide fails):
-   - For location/GPS errors: use get_location_guide_from_pdf(model_name=DeviceName)
-   - Extract DeviceName from database result
-   - Use guide from PDF directly in response
-   - If no DeviceName, use OS to determine folder_type as in step 2.
-   - Only display guide and images for the determined folder_type (IOS or Android). Do not display both.
-   - Do not display raw table data or full PDF content. Only extract and format the step-by-step guide with images.
-   - For iOS fallback, split the returned guide by ' > ' into steps and format with images.
+   - Strictly use this format for each step and image. Do not add extra text, tables, or deviate from the format.
 
 CRITICAL RULES:
 - status_message is the ONLY source to identify error - read it carefully
@@ -74,7 +75,6 @@ CRITICAL RULES:
 - Reply in Vietnamese, step-by-step, actionable instructions
 - Do not output tables or raw data from PDF; always format as step-by-step guide with images
 - Your final response must consist ONLY of the formatted steps and images, without any introductory text, explanations, or additional content. Start directly with "Bước 1\n\n![Ảnh 1](url)" and continue for each step.
-- For iOS responses, ensure to parse and format the guide into individual steps separated by ' > ', and assign images in order without displaying tables.
 """,
     tools=agent_tools,
 )
